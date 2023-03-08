@@ -6,7 +6,7 @@ use serde_derive::{Deserialize, Serialize};
 
 #[cfg(debug_assertions)]
 fn missing_tag_warning(_s: &str) {
-    println!("{}", _s);
+    panic!("{}", _s);
 }
 
 #[cfg(not(debug_assertions))]
@@ -887,7 +887,7 @@ impl PubmedArticle {
 }
 
 pub struct PubmedArticleSet {
-    pub articles: Vec<Article>,
+    pub articles: Vec<PubmedArticle>,
 }
 
 impl PubmedArticleSet {
@@ -908,12 +908,12 @@ impl PubmedArticleSet {
         Self { articles }
     }
 
-    fn helper(node: &roxmltree::Node, articles: &mut Vec<Article>) {
+    fn helper(node: &roxmltree::Node, articles: &mut Vec<PubmedArticle>) {
         println!("{}", "Called Helper function");
 
         for node in node.children() {
             if node.tag_name().name() == "PubmedArticle" {
-                articles.push(Article::new_from_xml(&node));
+                articles.push(PubmedArticle::new_from_xml(&node));
             }
         }
     }
