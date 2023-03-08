@@ -909,8 +909,6 @@ impl PubmedArticleSet {
     }
 
     fn helper(node: &roxmltree::Node, articles: &mut Vec<PubmedArticle>) {
-        println!("{}", "Called Helper function");
-
         for node in node.children() {
             if node.tag_name().name() == "PubmedArticle" {
                 articles.push(PubmedArticle::new_from_xml(&node));
