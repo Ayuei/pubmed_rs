@@ -1,20 +1,18 @@
 extern crate roxmltree;
 
-use reqwest;
-use serde::{Deserialize, Serialize};
-use serde_json;
-use std::error::Error;
-use std::fs::File;
-use std::io::prelude::*;
-use std::{thread, time};
+use std::io::{BufReader, Read};
+
+use serde_derive::{Deserialize, Serialize};
 
 #[cfg(debug_assertions)]
 fn missing_tag_warning(_s: &str) {
-    panic!("{}", _s);
+    println!("{}", _s);
 }
 
 #[cfg(not(debug_assertions))]
-fn missing_tag_warning(_s: &str) {}
+fn missing_tag_warning(_s: &str) {
+    println!("{}", _s);
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PubMedDate {
@@ -855,6 +853,7 @@ impl PubmedData {
         for n in node.children().filter(|v| v.is_element()) {
             match n.tag_name().name() {
                 "Reference" => self.references.push(Reference::new_from_xml(&n)),
+                "Title" => self.references.push(Reference::new_from_xml(&n)),
                 x => println!(
                     "Not covered in PubmedData::add_references_from_xml: '{}'",
                     x
@@ -889,140 +888,48 @@ impl PubmedArticle {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Client {
-    api_key: Option<String>,
+pub struct PubmedArticleSet {
+    pub articles: Vec<Article>,
 }
 
-impl Client {
-    pub fn new() -> Self {
-        let mut ret = Client { api_key: None };
-        match File::open("ncbi_key") {
-            Ok(mut f) => {
-                let mut buffer = String::new();
-                match f.read_to_string(&mut buffer) {
-                    Ok(_) => {
-                        ret.api_key = Some(buffer);
-                    }
-                    _ => {}
-                }
+impl PubmedArticleSet {
+    pub fn new_from_xml(root: &roxmltree::Node) -> Self {
+        let mut articles = Vec::new();
+        for node in root.children().filter(|n| n.is_element()) {
+            println!("{:?}", node);
+            if node.tag_name().name() == "PubmedArticleSet" {
+                PubmedArticleSet::helper(&node, &mut articles);
+                break;
             }
-            _ => {}
         }
-        ret
-    }
 
-    pub fn article_ids_from_query(
-        &self,
-        query: &String,
-        max: u64,
-    ) -> Result<Vec<u64>, Box<dyn Error>> {
-        let url = format!("http://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&retmode=json&retmax={}&term={}",max,query);
-        //println!("PubMed::article_ids_from_query: {}", &url);
-        let json: serde_json::Value = reqwest::blocking::get(url.as_str())?.json()?;
-        match json["esearchresult"]["idlist"].as_array() {
-            Some(idlist) => Ok(idlist
-                .iter()
-                .map(|id| match id.as_str() {
-                    Some(x) => match x.parse::<u64>() {
-                        Ok(u) => u,
-                        Err(_) => {
-                            println!(
-                                "PubMed::article_ids_from_query: '{}' should be a numeric ID",
-                                &x
-                            );
-                            0
-                        }
-                    },
-                    None => 0,
-                })
-                .filter(|id| *id != 0)
-                .collect()),
-            None => Err(From::from("API error/no results")),
+        if articles.len() == 0 {
+            panic!("Couldn't find any articles");
         }
+
+        Self { articles }
     }
 
-    pub fn articles(&self, ids: &Vec<u64>) -> Result<Vec<PubmedArticle>, Box<dyn Error>> {
-        let ids: Vec<String> = ids.iter().map(|id| id.to_string()).collect();
-        let url = format!(
-            "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&retmode=xml&id={}",
-            ids.join(",")
-        );
-        let text = reqwest::blocking::get(url.as_str())?.text()?;
-        let doc = roxmltree::Document::parse(&text)?;
-        thread::sleep(self.get_sleep_time()); // To avoid being blocked by PubMed API
-        Ok(doc
-            .root()
-            .descendants()
-            .filter(|n| n.is_element() && n.tag_name().name() == "PubmedArticle")
-            .map(|n| PubmedArticle::new_from_xml(&n))
-            .collect())
-    }
+    fn helper(node: &roxmltree::Node, articles: &mut Vec<Article>) {
+        println!("{}", "Called Helper function");
 
-    fn get_sleep_time(&self) -> time::Duration {
-        /*
-        match self.api_key {
-            Some(_) => time::Duration::from_millis(120), // 10/sec with api_key
-            None => time::Duration::from_millis(400),    // 3/sec without api key
-        }
-        */
-        time::Duration::from_millis(500) // Blanket default
-    }
-
-    pub fn article(&self, id: u64) -> Result<PubmedArticle, Box<dyn Error>> {
-        match self.articles(&vec![id])?.pop() {
-            Some(pubmed_article) => Ok(pubmed_article),
-            None => Err(From::from(format!(
-                "Can't find PubmedArticle for ID '{}'",
-                id
-            ))),
+        for node in node.children() {
+            if node.tag_name().name() == "PubmedArticle" {
+                articles.push(Article::new_from_xml(&node));
+            }
         }
     }
 }
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn doi() {
-        let client = super::Client::new();
-        let ids = client
-            .article_ids_from_query(&"\"10.1038/NATURE11174\"".to_string(), 1000)
-            .unwrap();
-        assert_eq!(ids, vec![22722859])
-    }
+#[test]
+fn test_parse() {
+    let file = std::fs::File::open("pubmed23n1166.xml").unwrap();
+    let mut buffer = String::new();
+    let mut bufreader = BufReader::new(&file);
+    bufreader.read_to_string(&mut buffer).unwrap();
 
-    #[test]
-    fn work() {
-        let client = super::Client::new();
-        let article = client.article(22722859).unwrap();
-        let date = article
-            .medline_citation
-            .unwrap()
-            .date_completed
-            .unwrap()
-            .clone();
-        assert_eq!(date.year, 2012);
-        assert_eq!(date.month, 8);
-        assert_eq!(date.day, 17);
-    }
+    let root = roxmltree::Document::parse(&buffer).unwrap();
+    let article = PubmedArticleSet::new_from_xml(&root.root());
 
-    #[test]
-    fn date_parsing() {
-        let client = super::Client::new();
-        let article = client.article(13777676).unwrap();
-        let date = article
-            .medline_citation
-            .unwrap()
-            .article
-            .unwrap()
-            .journal
-            .unwrap()
-            .journal_issue
-            .unwrap()
-            .pub_date
-            .unwrap();
-        assert_eq!(date.year, 1961);
-        assert_eq!(date.month, 5);
-        assert_eq!(date.day, 0);
-    }
+    assert!(article.articles.len() > 0);
 }
