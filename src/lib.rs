@@ -894,7 +894,6 @@ impl PubmedArticleSet {
     pub fn new_from_xml(root: &roxmltree::Node) -> Self {
         let mut articles = Vec::new();
         for node in root.children().filter(|n| n.is_element()) {
-            println!("{:?}", node);
             if node.tag_name().name() == "PubmedArticleSet" {
                 PubmedArticleSet::helper(&node, &mut articles);
                 break;
