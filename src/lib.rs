@@ -10,9 +10,7 @@ fn missing_tag_warning(_s: &str) {
 }
 
 #[cfg(not(debug_assertions))]
-fn missing_tag_warning(_s: &str) {
-    println!("{}", _s);
-}
+fn missing_tag_warning(_s: &str) {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PubMedDate {
